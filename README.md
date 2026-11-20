@@ -62,7 +62,7 @@ MAX_TICKETS=10 MAX_HOURS=8 MAX_COST_USD=60 agent-factory-kit/bin/agent-loop.sh
 ## How the loop decides
 
 1. Stop starting work if a limit is hit: ticket count, wall-clock hours, or cumulative cost. Stop when the frontier is empty and nothing is running.
-2. Read the **frontier**: ready, unblocked tickets carrying the `agent-ok` label (`READY_LABEL`). Independence comes from the ticket graph, so a ticket only appears once its blockers are done. Claim up to `MAX_PARALLEL` (default 2).
+2. Read the **frontier** from the tracker (see Trackers): ready, unblocked tickets carrying the ready label (`READY_LABEL`: `agent-ok` for beads, `ready-for-agent` for GitHub). Independence comes from the ticket graph, so a ticket only appears once its blockers are done. Claim up to `MAX_PARALLEL` (default 2).
 3. Each ticket gets its own worktree on a branch named `agent/<id>`, and one fresh agent process. The prompt (`templates/PROMPT.md`) tells it to build test-first with the `tdd` skill and review its own diff with the `code-review` skill.
 4. The worker merges the latest integration branch into the ticket branch. If that conflicts, a second agent session resolves the conflicts. Then it runs `ci.sh` on the branch.
 5. Only the loop merges into the integration branch (`MAIN_BRANCH`, default `main`), one ticket at a time, then runs `ci.sh` again on the merged result. The merge commit reads `Merge <id>: <ticket title>` with `Ticket:` and `CI:` trailers, and `agent/<id>` is kept, so the history reads like merged PRs. If the integration branch moved while a ticket waited to merge, the ticket is re-queued to re-sync. That is not counted as a failure.
@@ -76,6 +76,20 @@ Tickets that edit the same file will conflict when run in parallel. Structure th
 Agents are given a fixed allow-list of tools on the command line (`ALLOWED_TOOLS`), because Claude Code ignores a project's `permissions.allow` until the folder is trusted. On Windows the sandbox is not active, so the allow-list and the `git push` deny rule are the protection, not a sandbox.
 
 The agent's own claim that tests pass is never trusted.
+
+## Trackers
+
+Each repository has exactly one tracker, chosen per repository: **beads is for the stock project only; every other repo uses GitHub Issues** (see `docs/adr/0001-github-issues-by-default.md`). The loop reads either through `TRACKER=beads|github` (default `beads`).
+
+GitHub Issues backend (`TRACKER=github`, repo from `TRACKER_REPO` or the `origin` remote; needs `gh` signed in):
+
+- **Frontier**: open issues labelled `ready-for-agent` (`READY_LABEL`), not labelled `in-progress`, whose `## Blocked by` lines (`- Blocked by #4`, the format the `to-issues` skill writes) are all closed. An issue that others name under `## Parent` is an epic (a PRD, say) and is never built.
+- **Claim** adds `in-progress`. A failed attempt removes it. Failing `MAX_FAILS` times removes `ready-for-agent` and adds `ready-for-human`, with the gate output as a comment. A merged ticket is closed with a comment naming the merge commit; agent notes are comments.
+- Loop ids are `gh-<number>` (branch `agent/gh-12`, commit `Merge gh-12: <title>`). Agents may only run `gh issue view` and `gh issue comment`; the loop alone changes labels and state.
+- Preflight creates the two labels, then refuses to start if `gh` fails or a ready issue names a blocker that does not exist, is itself, or has no `#number`. Run the same check by hand: `py tracker/gh_tracker.py check --repo owner/name`.
+- Time rollup writes into beads only, so it is skipped here.
+
+Moving a repo from beads to GitHub Issues: `py tracker/beads_to_github.py --repo-path <repo> --github owner/name --branch <integration branch>` prints the plan and changes nothing; add `--apply` to create the issues (dependency order, done tickets closed with their merge commit, notes carried over, an id map written to `tracker/github-issue-map.json`). Re-running skips what exists, so an interrupted run resumes. Review the plan first: on a public repo the issues are public.
 
 ## Active time
 
