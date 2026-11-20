@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Factory dashboard</title>
+  <style>
+    :root {
+      --bg: #fff;
+      --fg: #1c1c1e;
+      --mute: #6b7280;
+      --line: #e5e7eb;
+      --accent: #2563eb;
+      --warn: #b45309;
+      --bad: #b91c1c;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111318;
+        --fg: #e8e8ea;
+        --mute: #9ca3af;
+        --line: #2a2e37;
+        --accent: #60a5fa;
+        --warn: #fbbf24;
+        --bad: #f87171;
+        color-scheme: dark;
+      }
+    }
+    body {
+      margin: 0;
+      padding: 1.5rem 1rem;
+      background: var(--bg);
+      color: var(--fg);
+      font:
+        14px/1.5 system-ui,
+        sans-serif;
+    }
+    main {
+      max-width: 72rem;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 1.3rem;
+      margin: 0;
+    }
+    h2 {
+      font-size: 1.05rem;
+      margin: 2rem 0 0.2rem;
+    }
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      margin: 0.9rem 0 0.3rem;
+    }
+    .mute {
+      color: var(--mute);
+      font-weight: 400;
+    }
+    a {
+      color: var(--accent);
+    }
+    .wrap {
+      overflow-x: auto;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th,
+    td {
+      text-align: left;
+      padding: 0.3rem 0.55rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th {
+      color: var(--mute);
+      font-weight: 500;
+    }
+    code {
+      font-family: ui-monospace, monospace;
+    }
+    .tag {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 0.3rem;
+      padding: 0 0.35rem;
+      margin: 0 0.2rem 0.2rem 0;
+      font-size: 12px;
+      color: var(--mute);
+    }
+    .badge {
+      display: inline-block;
+      border-radius: 0.3rem;
+      padding: 0 0.4rem;
+      margin-left: 0.4rem;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--line);
+      color: var(--mute);
+    }
+    .badge.stale {
+      color: var(--warn);
+      border-color: var(--warn);
+    }
+    .badge.unavailable {
+      color: var(--bad);
+      border-color: var(--bad);
+    }
+    .stale-body {
+      opacity: 0.55;
+    }
+    #banner {
+      display: none;
+      margin: 0.8rem 0;
+      padding: 0.4rem 0.7rem;
+      border: 1px solid var(--bad);
+      border-radius: 0.3rem;
+      color: var(--bad);
+    }
+  </style>
+  <main>
+    <h1>Factory dashboard</h1>
+    <p class="mute" id="meta">Loading…</p>
+    <div id="banner"></div>
+    <div id="root"></div>
+  </main>
+  <script>
+    const POLL_MS = 3000;
+    const esc = (s) =>
+      String(s ?? "").replace(
+        /[&<>"']/g,
+        (c) =>
+          ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          })[c],
+      );
+    const url = (u) => (/^https:\/\//.test(u) ? esc(u) : "#");
+    const age = (s) =>
+      s == null
+        ? "never"
+        : s < 60
+          ? Math.round(s) + "s"
+          : s < 3600
+            ? Math.round(s / 60) + "m"
+            : Math.round(s / 3600) + "h";
+    const tag = (t) => `<span class="tag">${esc(t)}</span>`;
+    const table = (heads, rows) =>
+      rows.length
+        ? `<div class="wrap"><table><thead><tr>${heads.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows
+            .map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`)
+            .join("")}</tbody></table></div>`
+        : `<p class="mute">None.</p>`;
+
+    // Open/closed state of each <details>, kept across re-renders. Default: open.
+    const closed = new Set();
+    document.addEventListener(
+      "toggle",
+      (e) => {
+        const k = e.target.dataset && e.target.dataset.key;
+        if (k) e.target.open ? closed.delete(k) : closed.add(k);
+      },
+      true,
+    );
+
+    function badge(s) {
+      if (!s) return "";
+      if (s.status === "fresh")
+        return `<span class="badge">${age(s.age)} ago</span>`;
+      if (s.status === "stale")
+        return `<span class="badge stale">stale, last good ${age(s.age)} ago: ${esc(s.error)}</span>`;
+      return `<span class="badge unavailable">unavailable: ${esc(s.error)}</span>`;
+    }
+
+    // One collapsible block for a Source. body(data) renders only when there is data.
+    function block(key, title, s, body) {
+      if (!s) return "";
+      const inner =
+        s.status === "unavailable"
+          ? `<p class="mute">No data yet.</p>`
+          : `<div class="${s.status === "stale" ? "stale-body" : ""}">${body(s.data)}</div>`;
+      return `<details data-key="${esc(key)}"${closed.has(key) ? "" : " open"}><summary>${title}${badge(s)}</summary>${inner}</details>`;
+    }
+
+    const counts = (items, st) => items.filter((i) => i.status === st).length;
+
+    function summaryRow(r) {
+      const g = r.sources.git,
+        t = r.sources.tracker,
+        h = r.sources.github;
+      if (g && g.data && g.data.missing)
+        return `<tr><td>${esc(r.name)}</td><td colspan="6">not found at ${esc(r.path)}</td></tr>`;
+      const cell = (s, f) =>
+        !s
+          ? "n/a"
+          : s.data == null
+            ? `<span class="badge unavailable">unavailable</span>`
+            : esc(f(s.data)) +
+              (s.status === "stale"
+                ? ` <span class="badge stale">stale</span>`
+                : "");
+      const tk = cell(
+        t,
+        (d) =>
+          `${counts(d, "closed")}/${d.length} done, ${counts(d, "in_progress")} active, ${counts(d, "blocked")} blocked`,
+      );
+      const gi = cell(
+        h,
+        (d) =>
+          `${d.issues.filter((i) => i.state === "OPEN").length} open / ${d.issues.length}`,
+      );
+      const gp = cell(
+        h,
+        (d) =>
+          `${d.prs.filter((i) => i.state === "OPEN").length} open / ${d.prs.length}`,
+      );
+      const lp = cell(
+        g,
+        (d) =>
+          `${d.lprs.filter((x) => !x.merged).length} open / ${d.lprs.length}`,
+      );
+      const up =
+        g && g.data
+          ? esc(g.data.state.unpushed) +
+            (!["0", "no remote"].includes(g.data.state.unpushed) ? " ⚠" : "")
+          : "n/a";
+      const dirty = g && g.data && g.data.state.dirty ? " (dirty)" : "";
+      return `<tr><td><a href="#repo-${esc(r.name)}">${esc(r.name)}</a></td><td>${tk}</td><td>${gi}</td><td>${gp}</td><td>${lp}</td><td>${up}</td><td><code>${esc(r.branch)}</code>${dirty}</td></tr>`;
+    }
+
+    function section(r) {
+      const g = r.sources.git;
+      if (g && g.data && g.data.missing) return "";
+      const order = {
+        in_progress: 0,
+        open: 1,
+        blocked: 2,
+        deferred: 3,
+        closed: 4,
+      };
+      const k = (x) => `${r.name}/${x}`;
+      let head = `<h2 id="repo-${esc(r.name)}">${esc(r.name)} <span class="mute">${esc(r.github)}</span></h2>`;
+      if (g && g.data)
+        head += `<p class="mute">Head of <code>${esc(r.branch)}</code>: ${esc(g.data.state.head)} · unpushed commits: ${esc(g.data.state.unpushed)}</p>`;
+      return (
+        head +
+        block(k("tickets"), "Local tickets (beads)", r.sources.tracker, (d) =>
+          table(
+            ["ID", "Title", "Status", "Pri", "Labels"],
+            [...d]
+              .sort(
+                (a, b) =>
+                  (order[a.status] ?? 9) - (order[b.status] ?? 9) ||
+                  (a.priority ?? 9) - (b.priority ?? 9) ||
+                  String(a.id).localeCompare(String(b.id)),
+              )
+              .map((i) => [
+                `<code>${esc(i.id)}</code>`,
+                esc(i.title),
+                esc(i.status),
+                "P" + esc(i.priority),
+                (i.labels || [])
+                  .filter((l) => !l.startsWith("src:"))
+                  .map(tag)
+                  .join(" "),
+              ]),
+          ),
+        ) +
+        block(k("lprs"), "Local PRs (agent branches)", g, (d) =>
+          table(
+            ["Branch", "State", "Commits ahead", "Last commit"],
+            d.lprs.map((x) => [
+              `<code>${esc(x.branch)}</code>`,
+              x.merged ? "merged" : "open",
+              esc(x.ahead),
+              esc(x.last),
+            ]),
+          ),
+        ) +
+        block(k("merges"), "Recent merges", g, (d) =>
+          d.state.merges.length
+            ? "<ul>" +
+              d.state.merges
+                .map(
+                  (m) =>
+                    `<li><code>${esc(m.split("|")[0])}</code> ${esc(m.split("|").slice(1).join("|"))}</li>`,
+                )
+                .join("") +
+              "</ul>"
+            : `<p class="mute">None.</p>`,
+        ) +
+        block(k("issues"), "GitHub issues", r.sources.github, (d) =>
+          table(
+            ["#", "Title", "State", "Labels"],
+            d.issues.map((i) => [
+              `<a href="${url(i.url)}" target="_blank" rel="noopener">#${esc(i.number)}</a>`,
+              esc(i.title),
+              esc(i.state),
+              (i.labels || []).map((l) => tag(l.name)).join(" "),
+            ]),
+          ),
+        ) +
+        block(k("prs"), "GitHub pull requests", r.sources.github, (d) =>
+          table(
+            ["#", "Title", "State", "Branch"],
+            d.prs.map((p) => [
+              `<a href="${url(p.url)}" target="_blank" rel="noopener">#${esc(p.number)}</a>`,
+              esc(p.title),
+              esc(p.state),
+              `<code>${esc(p.headRefName)}</code>`,
+            ]),
+          ),
+        )
+      );
+    }
+
+    function render(st) {
+      const y = window.scrollY;
+      document.getElementById("meta").textContent =
+        `Updated ${st.generated} · refreshes every ${POLL_MS / 1000}s · tracker = beads tickets, GitHub = issues and PRs, local PRs = agent/<id> branches`;
+      document.getElementById("root").innerHTML =
+        `<div class="wrap"><table><thead><tr><th>Repo</th><th>Local tickets</th><th>GH issues</th><th>GH PRs</th><th>Local PRs</th><th>Unpushed</th><th>Branch</th></tr></thead><tbody>${st.repos.map(summaryRow).join("")}</tbody></table></div>` +
+        st.repos.map(section).join("");
+      window.scrollTo(0, y);
+    }
+
+    async function poll() {
+      const banner = document.getElementById("banner");
+      try {
+        const r = await fetch("/api/state", { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        render(await r.json());
+        banner.style.display = "none";
+      } catch (e) {
+        banner.textContent =
+          "Dashboard server unreachable (" +
+          e.message +
+          "). Showing the last data received.";
+        banner.style.display = "block";
+      }
+    }
+    poll();
+    setInterval(poll, POLL_MS);
+  </script>
+</html>

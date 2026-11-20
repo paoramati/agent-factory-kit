@@ -44,6 +44,18 @@ _Avoid_: Run (for the whole cycle), pipeline
 A ticket is done when the agent has built it test-first, reviewed its own diff against the ticket, and the gate passes on the ticket branch and again after merging.
 _Avoid_: Finished, complete
 
+**Dashboard**:
+The one local page that shows every repository's tickets, issues, pull requests and agent branches, updating while the owner watches.
+_Avoid_: Board, report
+
+**Source**:
+One origin of dashboard data: the tracker, GitHub, or the local branches. Each Source has its own age and can fail without affecting the others.
+_Avoid_: Feed, provider
+
+**Stale**:
+A Source whose latest refresh failed, so the Dashboard shows its last good data marked with its age rather than empty.
+_Avoid_: Broken, offline
+
 ## Relationships
 
 - A **Tracker** holds many **Tickets**; each repository has exactly one **Tracker**
