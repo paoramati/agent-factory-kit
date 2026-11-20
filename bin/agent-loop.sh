@@ -10,7 +10,7 @@
 #   PER_RUN_TURNS=80     --max-turns for each agent run
 #   MAX_FAILS=2          failures on one ticket before it is marked blocked
 #   AGENT=claude         claude | opencode
-#   MAIN_BRANCH=main
+#   MAIN_BRANCH=main      the long-running integration branch every ticket merges into (e.g. MAIN_BRANCH=factory)
 #   CI_CMD=./ci.sh
 #   PROMPT_FILE=PROMPT.md  (falls back to the kit's templates/PROMPT.md)
 #   WORKTREE_DIR=.worktrees
@@ -42,6 +42,7 @@ PROMPT_FILE="${PROMPT_FILE:-PROMPT.md}"
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
+git rev-parse --verify -q "$MAIN_BRANCH" >/dev/null || { echo "Branch $MAIN_BRANCH does not exist. Create it first (git branch $MAIN_BRANCH)." >&2; exit 1; }
 LOG_DIR=".agent/loop"
 mkdir -p "$LOG_DIR" ".agent/time" "$WORKTREE_DIR"
 RUN_LOG="$LOG_DIR/run-$(date +%Y%m%d-%H%M%S).log"
@@ -57,6 +58,9 @@ tracker_claim()   { bd update "$1" --claim >/dev/null; }
 tracker_note()    { bd comments add "$1" "$2" >/dev/null 2>&1 || true; }
 tracker_status()  { bd update "$1" --status "$2" >/dev/null; }
 tracker_close()   { bd close "$1" >/dev/null; }
+tracker_title()   { bd show "$1" --json 2>/dev/null | py -c 'import json,sys
+d=json.load(sys.stdin); d=d[0] if isinstance(d,list) else d
+print(d.get("title",""))' || true; }
 # --------------------------------------------------------------------------
 
 # Refuse to run if this repo can push anywhere.
@@ -130,7 +134,8 @@ while :; do
   else
     git checkout -q "$MAIN_BRANCH"
     pre_merge=$(git rev-parse HEAD)
-    if ! git merge -q --no-ff "$branch" -m "Merge $id" >>"$RUN_LOG" 2>&1; then
+    title="$(tracker_title "$id")"
+    if ! git merge -q --no-ff "$branch" -m "Merge $id: ${title:-ticket}" -m "Ticket: $id" -m "CI: ci.sh passed on branch and after merge" >>"$RUN_LOG" 2>&1; then
       git merge --abort 2>/dev/null || true
       fail "merge conflict with $MAIN_BRANCH"
     elif ! $CI_CMD >>"$RUN_LOG" 2>&1; then

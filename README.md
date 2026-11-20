@@ -64,7 +64,9 @@ MAX_TICKETS=10 MAX_HOURS=8 MAX_COST_USD=60 agent-factory-kit/bin/agent-loop.sh
 3. Create a worktree on a branch named after the ticket.
 4. Run one fresh agent process in that worktree with the ticket ID and `templates/PROMPT.md`.
 5. Run `ci.sh` in the worktree. Fail → reopen the ticket with a note; second failure → mark it blocked.
-6. Merge into the local main branch, run `ci.sh` again on the merged result. Fail → undo the merge, reopen.
+6. Merge into the integration branch (`MAIN_BRANCH`, default `main`), run `ci.sh` again on the merged result. Fail → undo the merge, reopen. The merge commit reads `Merge <id>: <ticket title>` with `Ticket:` and `CI:` trailers, and the `agent/<id>` branch is kept, so the history reads like merged PRs.
+
+For a long-running feature branch, create it (`git branch factory`) and run with `MAIN_BRANCH=factory`. Every ticket then merges there, and `main` stays untouched until you merge `factory` yourself.
 7. Close the ticket, roll up time, remove the worktree.
 
 The agent's own claim that tests pass is never trusted.
