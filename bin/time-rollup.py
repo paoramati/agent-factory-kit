@@ -18,7 +18,7 @@ Usage:
 --write-md    update the 'time:' block in tracker/tickets/<ID>.md frontmatter
 Processed sessions are recorded in <time-dir>/.rolled-up so nothing is counted twice.
 """
-import argparse, collections, datetime as dt, json, os, re, subprocess, sys
+import argparse, collections, datetime as dt, json, os, re, shutil, subprocess, sys
 
 WAITING = {"stop", "idle", "end"}
 
@@ -68,16 +68,19 @@ def active_seconds(events, idle):
     return out
 
 
+BD = shutil.which("bd") or "bd"  # Windows Python cannot launch an npm shim by bare name
+
+
 def write_bd(ticket, seconds, sessions_info):
     payload = {"time": {"active_seconds_added": int(seconds), "sessions": sessions_info}}
-    help_txt = subprocess.run(["bd", "update", "--help"], capture_output=True, text=True).stdout
+    help_txt = subprocess.run([BD, "update", "--help"], capture_output=True, text=True).stdout
     if "--metadata" in help_txt:
-        r = subprocess.run(["bd", "update", ticket, "--metadata", json.dumps(payload)],
+        r = subprocess.run([BD, "update", ticket, "--metadata", json.dumps(payload)],
                            capture_output=True, text=True)
         if r.returncode == 0:
             return "metadata"
     note = f"time: +{int(seconds)//60}m {int(seconds)%60}s active ({len(sessions_info)} session(s))"
-    subprocess.run(["bd", "comments", "add", ticket, note], capture_output=True, text=True)
+    subprocess.run([BD, "comments", "add", ticket, note], capture_output=True, text=True)
     return "comment"
 
 

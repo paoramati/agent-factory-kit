@@ -20,6 +20,10 @@ _Avoid_: Backlog, board
 The one script whose pass or fail decides whether a ticket's work is accepted.
 _Avoid_: CI (unless it is literally a hosted service), tests
 
+**Frontier**:
+The tickets that are ready: unblocked, marked safe for an agent, and not already claimed.
+_Avoid_: Queue, backlog
+
 **Integration branch**:
 The long-running branch every ticket merges into, kept apart from main until the owner merges it.
 _Avoid_: Develop, trunk
@@ -45,7 +49,7 @@ _Avoid_: Finished, complete
 - A **Tracker** holds many **Tickets**; each repository has exactly one **Tracker**
 - A **Ticket** is built on exactly one **Ticket branch** and merges into the **Integration branch**
 - The **Gate** is applied twice per **Ticket**: on the **Ticket branch**, then after the merge
-- The **Loop** only picks **Tickets** that are ready and marked safe for an agent
+- The **Loop** only picks **Tickets** from the **Frontier**, and may work several at once because a **Ticket** only enters the **Frontier** when its blockers are done
 
 ## Example dialogue
 

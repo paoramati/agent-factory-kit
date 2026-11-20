@@ -59,15 +59,19 @@ MAX_TICKETS=10 MAX_HOURS=8 MAX_COST_USD=60 agent-factory-kit/bin/agent-loop.sh
 
 ## How the loop decides
 
-1. Stop if any limit is hit: ticket count, wall-clock hours, cumulative cost, or an empty ready queue.
-2. Claim the top ready ticket.
-3. Create a worktree on a branch named after the ticket.
-4. Run one fresh agent process in that worktree with the ticket ID and `templates/PROMPT.md`.
-5. Run `ci.sh` in the worktree. Fail → reopen the ticket with a note; second failure → mark it blocked.
-6. Merge into the integration branch (`MAIN_BRANCH`, default `main`), run `ci.sh` again on the merged result. Fail → undo the merge, reopen. The merge commit reads `Merge <id>: <ticket title>` with `Ticket:` and `CI:` trailers, and the `agent/<id>` branch is kept, so the history reads like merged PRs.
+1. Stop starting work if a limit is hit: ticket count, wall-clock hours, or cumulative cost. Stop when the frontier is empty and nothing is running.
+2. Read the **frontier**: ready, unblocked tickets carrying the `agent-ok` label (`READY_LABEL`). Independence comes from the ticket graph, so a ticket only appears once its blockers are done. Claim up to `MAX_PARALLEL` (default 2).
+3. Each ticket gets its own worktree on a branch named `agent/<id>`, and one fresh agent process. The prompt (`templates/PROMPT.md`) tells it to build test-first with the `tdd` skill and review its own diff with the `code-review` skill.
+4. The worker merges the latest integration branch into the ticket branch. If that conflicts, a second agent session resolves the conflicts. Then it runs `ci.sh` on the branch.
+5. Only the loop merges into the integration branch (`MAIN_BRANCH`, default `main`), one ticket at a time, then runs `ci.sh` again on the merged result. The merge commit reads `Merge <id>: <ticket title>` with `Ticket:` and `CI:` trailers, and `agent/<id>` is kept, so the history reads like merged PRs. If the integration branch moved while a ticket waited to merge, the ticket is re-queued to re-sync. That is not counted as a failure.
+6. A failure reopens the ticket with a note holding the gate output. A gate failure keeps the ticket branch, and the next attempt continues from it with the gate output in its prompt. An attempt that commits nothing starts fresh. Failing `MAX_FAILS` times (default 2) marks the ticket blocked.
+7. Close the ticket, roll up time, remove the worktree.
 
 For a long-running feature branch, create it (`git branch factory`) and run with `MAIN_BRANCH=factory`. Every ticket then merges there, and `main` stays untouched until you merge `factory` yourself.
-7. Close the ticket, roll up time, remove the worktree.
+
+Tickets that edit the same file will conflict when run in parallel. Structure the code so independent tickets touch different files (one file per command, for example), or run with `MAX_PARALLEL=1`.
+
+Agents are given a fixed allow-list of tools on the command line (`ALLOWED_TOOLS`), because Claude Code ignores a project's `permissions.allow` until the folder is trusted. On Windows the sandbox is not active, so the allow-list and the `git push` deny rule are the protection, not a sandbox.
 
 The agent's own claim that tests pass is never trusted.
 
