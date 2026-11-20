@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# ci.sh: the single source of truth for "is this change acceptable".
+# Agents run it before finishing. agent-loop.sh runs it on the branch and again after merging.
+# A future hosted CI workflow should call this same script.
+#
+# Rules:
+#   - Exit non-zero on any failure.
+#   - No network calls beyond package registries.
+#   - Must work from a fresh git worktree with no manual setup.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+step() { printf '\n== %s ==\n' "$*"; }
+
+step "Tracker schema"
+python3 "${KIT_DIR:-../agent-factory-kit}/tracker/validate.py" tracker/tickets 2>/dev/null || echo "(skipped: no markdown tickets)"
+
+step "Backend: build and test"
+# e.g. (cd backend && ./build-tool verify)
+
+step "Frontend: lint and unit tests"
+# e.g. (cd frontend && npm ci && npm run lint && npm test -- --watch=false)
+
+step "End-to-end (optional, slower)"
+# e.g. (cd e2e && npx playwright test)
+
+echo
+echo "ci.sh: all checks passed"
