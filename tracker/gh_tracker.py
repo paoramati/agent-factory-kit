@@ -131,13 +131,61 @@ class GithubTracker:
                 problems.append(f"#{n} has a Blocked by line with no issue number: {line}")
         return problems
 
+    # ---- actions: how the Loop changes an issue's state --------------------------------------
+    def _edit(self, n, *flags):
+        self._gh("issue", "edit", str(n), "--repo", self.repo, *flags)
+
+    def claim(self, n):
+        self._edit(n, "--add-label", IN_PROGRESS)
+
+    def status(self, n, status):
+        """open: back to the Frontier. blocked: handed to a human. in_progress: claimed."""
+        if status == "open":
+            self._edit(n, "--remove-label", IN_PROGRESS)
+        elif status == "in_progress":
+            self.claim(n)
+        elif status == "blocked":
+            self._edit(n, "--remove-label", self.ready_label, "--remove-label", IN_PROGRESS,
+                       "--add-label", HUMAN)
+        else:
+            raise TrackerError(f"unknown status {status!r} (use open, in_progress or blocked)")
+
+    def note(self, n, text):
+        self._gh("issue", "comment", str(n), "--repo", self.repo, "--body", text)
+
+    def close(self, n, comment=None):
+        self._edit(n, "--remove-label", IN_PROGRESS)
+        extra = ["--comment", comment] if comment else []
+        self._gh("issue", "close", str(n), "--repo", self.repo, "--reason", "completed", *extra)
+
+    def title(self, n):
+        return self._gh("issue", "view", str(n), "--repo", self.repo, "--json", "title", "--jq", ".title").strip()
+
+    def ensure_labels(self):
+        """Create the labels the Loop sets, if the repo lacks them (--force updates, never fails on exists)."""
+        for name, color, desc in ((IN_PROGRESS, "fbca04", "An agent is working this ticket"),
+                                  (HUMAN, "d93f0b", "Needs a human: the Loop gave up or it is not for agents")):
+            self._gh("label", "create", name, "--repo", self.repo, "--color", color, "--description", desc, "--force")
+
+
+def issue_number(ref):
+    """12, '12', '#12' or a Loop id 'gh-12' -> 12."""
+    m = re.fullmatch(r"(?:gh-|#)?(\d+)", str(ref).strip())
+    if not m:
+        raise TrackerError(f"not an issue reference: {ref!r} (use 12, #12 or gh-12)")
+    return int(m.group(1))
+
 
 def main(argv=None, run=default_run, out=print):
     ap = argparse.ArgumentParser(prog="gh_tracker", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["ready", "check"])
+    ap.add_argument("command", choices=["ready", "check", "claim", "note", "status", "close", "title", "setup"])
+    ap.add_argument("ticket", nargs="?", help="issue number, #number or gh-number")
+    ap.add_argument("value", nargs="?", help="status: open | in_progress | blocked")
     ap.add_argument("--repo", required=True, help="owner/name")
     ap.add_argument("--ready-label", default=READY)
+    ap.add_argument("--body", default="", help="note text")
+    ap.add_argument("--comment", default=None, help="close: comment to post")
     a = ap.parse_args(argv)
     t = GithubTracker(a.repo, run, a.ready_label)
     try:
@@ -145,10 +193,31 @@ def main(argv=None, run=default_run, out=print):
             for n in t.ready():
                 out(str(n))
             return 0
-        problems = t.check()
-        for p in problems:
-            out(p)
-        return 1 if problems else 0
+        if a.command == "check":
+            problems = t.check()
+            for p in problems:
+                out(p)
+            return 1 if problems else 0
+        if a.command == "setup":
+            t.ensure_labels()
+            return 0
+        if a.ticket is None:
+            raise TrackerError(f"{a.command} needs an issue number")
+        n = issue_number(a.ticket)
+        if a.command == "claim":
+            t.claim(n)
+        elif a.command == "status":
+            t.status(n, a.value or "")
+        elif a.command == "close":
+            t.close(n, a.comment)
+        elif a.command == "title":
+            out(t.title(n))
+        elif a.command == "note":
+            try:
+                t.note(n, a.body)
+            except TrackerError as e:  # a missing note must never stop the Loop
+                out(f"gh_tracker: warning: note not posted: {e}")
+        return 0
     except TrackerError as e:
         out(f"gh_tracker: {e}")
         return 2
