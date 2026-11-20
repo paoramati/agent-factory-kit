@@ -135,7 +135,8 @@ while :; do
     git checkout -q "$MAIN_BRANCH"
     pre_merge=$(git rev-parse HEAD)
     title="$(tracker_title "$id")"
-    if ! git merge -q --no-ff "$branch" -m "Merge $id: ${title:-ticket}" -m "Ticket: $id" -m "CI: ci.sh passed on branch and after merge" >>"$RUN_LOG" 2>&1; then
+    if ! git merge -q --no-ff "$branch" -m "Merge $id: ${title:-ticket}" -m "Ticket: $id"$'
+'"CI: ci.sh passed on branch and after merge" >>"$RUN_LOG" 2>&1; then
       git merge --abort 2>/dev/null || true
       fail "merge conflict with $MAIN_BRANCH"
     elif ! $CI_CMD >>"$RUN_LOG" 2>&1; then
