@@ -13,7 +13,7 @@ One unit of work with acceptance criteria, handed to one fresh agent.
 _Avoid_: Task, issue (when the tracker is not GitHub)
 
 **Tracker**:
-The single place a repository's tickets live, chosen per repository and never duplicated across two.
+The single place a repository's tickets live, chosen per repository and never duplicated across two. GitHub Issues by default; beads only for the stock project.
 _Avoid_: Backlog, board
 
 **Gate**:
@@ -21,8 +21,12 @@ The one script whose pass or fail decides whether a ticket's work is accepted.
 _Avoid_: CI (unless it is literally a hosted service), tests
 
 **Frontier**:
-The tickets that are ready: unblocked, marked safe for an agent, and not already claimed.
+The tickets that are ready: unblocked, marked safe for an agent, not already claimed, and not an epic.
 _Avoid_: Queue, backlog
+
+**Epic**:
+A ticket that other tickets name as their parent, such as a PRD. It groups work and is never built itself.
+_Avoid_: Parent ticket, umbrella
 
 **Integration branch**:
 The long-running branch every ticket merges into, kept apart from main until the owner merges it.
