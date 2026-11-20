@@ -149,6 +149,25 @@
             ? Math.round(s / 60) + "m"
             : Math.round(s / 3600) + "h";
     const tag = (t) => `<span class="tag">${esc(t)}</span>`;
+    // A commit time the way GitHub shows it: relative ("3 minutes ago"), full local timestamp on hover.
+    const when = (iso) => {
+      const t = Date.parse(iso);
+      if (!iso || isNaN(t)) return esc(iso || "");
+      const s = Math.max(0, (Date.now() - t) / 1000);
+      const n = (v, unit) =>
+        `${Math.floor(v)} ${unit}${Math.floor(v) === 1 ? "" : "s"} ago`;
+      const rel =
+        s < 45
+          ? "just now"
+          : s < 3600
+            ? n(s / 60, "minute")
+            : s < 86400
+              ? n(s / 3600, "hour")
+              : s < 2592000
+                ? n(s / 86400, "day")
+                : new Date(t).toLocaleDateString();
+      return `<time datetime="${esc(iso)}" title="${esc(new Date(t).toLocaleString())} (${esc(iso)})">${esc(rel)}</time>`;
+    };
     const table = (heads, rows) =>
       rows.length
         ? `<div class="wrap"><table><thead><tr>${heads.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows
@@ -208,11 +227,13 @@
         (d) =>
           `${counts(d, "closed")}/${d.length} done, ${counts(d, "in_progress")} active, ${counts(d, "blocked")} blocked`,
       );
-      const gi = cell(
-        h,
-        (d) =>
-          `${d.issues.filter((i) => i.state === "OPEN").length} open / ${d.issues.length}`,
-      );
+      const gi = cell(h, (d) => {
+        // Tickets are the issues that are not epics: done, being worked by the loop, handed to a human.
+        const tix = d.issues.filter((i) => !i.epic);
+        const has = (i, l) => (i.labels || []).some((x) => x.name === l);
+        const open = tix.filter((i) => i.state === "OPEN");
+        return `${tix.length - open.length}/${tix.length} done, ${open.filter((i) => has(i, "in-progress")).length} active, ${open.filter((i) => has(i, "ready-for-human")).length} for human`;
+      });
       const gp = cell(
         h,
         (d) =>
@@ -277,7 +298,7 @@
               `<code>${esc(x.branch)}</code>`,
               x.merged ? "merged" : "open",
               esc(x.ahead),
-              esc(x.last),
+              `${when(x.when)} ${esc(x.last)}`,
             ]),
           ),
         ) +
@@ -287,7 +308,7 @@
               d.state.merges
                 .map(
                   (m) =>
-                    `<li><code>${esc(m.split("|")[0])}</code> ${esc(m.split("|").slice(1).join("|"))}</li>`,
+                    `<li>${when(m.split("|")[0])} ${esc(m.split("|").slice(1).join("|"))}</li>`,
                 )
                 .join("") +
               "</ul>"
@@ -298,7 +319,7 @@
             ["#", "Title", "State", "Labels"],
             d.issues.map((i) => [
               `<a href="${url(i.url)}" target="_blank" rel="noopener">#${esc(i.number)}</a>`,
-              esc(i.title),
+              esc(i.title) + (i.epic ? " " + tag("epic") : ""),
               esc(i.state),
               (i.labels || []).map((l) => tag(l.name)).join(" "),
             ]),
@@ -323,7 +344,7 @@
       document.getElementById("meta").textContent =
         `Updated ${st.generated} · refreshes every ${POLL_MS / 1000}s · tracker = beads tickets, GitHub = issues and PRs, local PRs = agent/<id> branches`;
       document.getElementById("root").innerHTML =
-        `<div class="wrap"><table><thead><tr><th>Repo</th><th>Local tickets</th><th>GH issues</th><th>GH PRs</th><th>Local PRs</th><th>Unpushed</th><th>Branch</th></tr></thead><tbody>${st.repos.map(summaryRow).join("")}</tbody></table></div>` +
+        `<div class="wrap"><table><thead><tr><th>Repo</th><th>Local tickets</th><th>GH tickets</th><th>GH PRs</th><th>Local PRs</th><th>Unpushed</th><th>Branch</th></tr></thead><tbody>${st.repos.map(summaryRow).join("")}</tbody></table></div>` +
         st.repos.map(section).join("");
       window.scrollTo(0, y);
     }

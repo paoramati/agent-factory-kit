@@ -9,6 +9,8 @@ import os
 import shutil
 import subprocess
 
+from tracker.gh_tracker import parse_parents
+
 TIMEOUT = 60
 LOCAL_INTERVAL = 3
 GITHUB_INTERVAL = 60
@@ -61,7 +63,11 @@ def github(repo, run):
     """GitHub issues and pull requests."""
     g = repo["github"]
     issues = _json(_ok(run, ["gh", "issue", "list", "--repo", g, "--state", "all", "--limit", "50",
-                             "--json", "number,title,state,url,labels"], "gh issue list"), "gh issue list")
+                             "--json", "number,title,state,url,labels,body"], "gh issue list"), "gh issue list")
+    epics = {p for i in issues for p in parse_parents(i.get("body"))}  # an issue others name as parent
+    for i in issues:
+        i.pop("body", None)  # only needed to find parents; keep the state small
+        i["epic"] = i["number"] in epics
     prs = _json(_ok(run, ["gh", "pr", "list", "--repo", g, "--state", "all", "--limit", "50",
                           "--json", "number,title,state,url,headRefName"], "gh pr list"), "gh pr list")
     return {"issues": issues, "prs": prs}
@@ -94,14 +100,15 @@ def git(repo, run):
     state = {
         "unpushed": unpushed,
         "dirty": bool(req("status", "--porcelain")),
-        "merges": req("log", base, "--merges", "--format=%cs|%s", "-n", "8").splitlines(),
+        "merges": req("log", base, "--merges", "--format=%cI|%s", "-n", "8").splitlines(),
         "head": req("log", "-1", "--format=%h %s", base),
     }
     lprs = []
     for n in req("for-each-ref", "--format=%(refname:short)", "refs/heads/agent/").splitlines():
         rc, _ = run(g("merge-base", "--is-ancestor", n, base))
+        when, _, subject = req("log", "-1", "--format=%cI|%s", n).partition("|")  # ISO 8601 with time and zone
         lprs.append({"branch": n, "merged": rc == 0, "ahead": req("rev-list", "--count", f"{base}..{n}"),
-                     "last": req("log", "-1", "--format=%cs %s", n)})
+                     "last": subject, "when": when})
     return {"state": state, "lprs": lprs}
 
 

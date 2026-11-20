@@ -61,7 +61,7 @@ class TrackerTest(unittest.TestCase):
             collect.tracker(self.repo, FakeRun({beads_cmd(): SourceError("timed out")}))
 
 
-ISSUES = "gh issue list --repo o/r --state all --limit 50 --json number,title,state,url,labels"
+ISSUES = "gh issue list --repo o/r --state all --limit 50 --json number,title,state,url,labels,body"
 PRS = "gh pr list --repo o/r --state all --limit 50 --json number,title,state,url,headRefName"
 
 
@@ -70,7 +70,15 @@ class GithubTest(unittest.TestCase):
 
     def test_returns_issues_and_prs(self):
         run = FakeRun({ISSUES: (0, '[{"number": 1}]'), PRS: (0, '[{"number": 2}]')})
-        self.assertEqual(collect.github(self.repo, run), {"issues": [{"number": 1}], "prs": [{"number": 2}]})
+        self.assertEqual(collect.github(self.repo, run),
+                         {"issues": [{"number": 1, "epic": False}], "prs": [{"number": 2}]})
+
+    def test_an_issue_named_as_a_parent_is_flagged_as_an_epic_and_bodies_are_dropped(self):
+        issues = [{"number": 1, "body": "the PRD"}, {"number": 2, "body": "## Parent\n\n#1\n"},
+                  {"number": 3, "body": None}]
+        got = collect.github(self.repo, FakeRun({ISSUES: (0, json.dumps(issues)), PRS: (0, "[]")}))["issues"]
+        self.assertEqual([(i["number"], i["epic"]) for i in got], [(1, True), (2, False), (3, False)])
+        self.assertTrue(all("body" not in i for i in got))
 
     def test_either_call_failing_is_an_error(self):
         with self.assertRaises(SourceError):
@@ -98,7 +106,7 @@ class GitTest(unittest.TestCase):
         r = {
             self.g("rev-parse", "--abbrev-ref", "factory@{upstream}"): (0, "origin/factory\n"),
             self.g("rev-list", "--count", "origin/factory..factory"): (0, "0\n"),
-            self.g("log", "factory", "--merges", "--format=%cs|%s", "-n", "8"): (0, "2026-11-21|Merge gv-1: a\n"),
+            self.g("log", "factory", "--merges", "--format=%cI|%s", "-n", "8"): (0, "2026-11-21T14:03:09+13:00|Merge gv-1: a\n"),
             self.g("status", "--porcelain"): (0, ""),
             self.g("log", "-1", "--format=%h %s", "factory"): (0, "abc1234 head subject\n"),
             self.g("for-each-ref", "--format=%(refname:short)", "refs/heads/agent/"): (0, ""),
@@ -114,7 +122,7 @@ class GitTest(unittest.TestCase):
         s = collect.git(self.repo, self.base())["state"]
         self.assertEqual(s["unpushed"], "0")
         self.assertFalse(s["dirty"])
-        self.assertEqual(s["merges"], ["2026-11-21|Merge gv-1: a"])
+        self.assertEqual(s["merges"], ["2026-11-21T14:03:09+13:00|Merge gv-1: a"])
         self.assertEqual(s["head"], "abc1234 head subject")
 
     def test_unpushed_count_and_dirty(self):
@@ -142,13 +150,13 @@ class GitTest(unittest.TestCase):
             self.g("merge-base", "--is-ancestor", "agent/gv-2", "factory"): (1, ""),
             self.g("rev-list", "--count", "factory..agent/gv-1"): (0, "0\n"),
             self.g("rev-list", "--count", "factory..agent/gv-2"): (0, "2\n"),
-            self.g("log", "-1", "--format=%cs %s", "agent/gv-1"): (0, "2026-11-21 one\n"),
-            self.g("log", "-1", "--format=%cs %s", "agent/gv-2"): (0, "2026-11-21 two\n"),
+            self.g("log", "-1", "--format=%cI|%s", "agent/gv-1"): (0, "2026-11-21T10:00:00+13:00|one\n"),
+            self.g("log", "-1", "--format=%cI|%s", "agent/gv-2"): (0, "2026-11-21T11:30:45+13:00|two\n"),
         })
         lprs = collect.git(self.repo, run)["lprs"]
         self.assertEqual(lprs, [
-            {"branch": "agent/gv-1", "merged": True, "ahead": "0", "last": "2026-11-21 one"},
-            {"branch": "agent/gv-2", "merged": False, "ahead": "2", "last": "2026-11-21 two"},
+            {"branch": "agent/gv-1", "merged": True, "ahead": "0", "last": "one", "when": "2026-11-21T10:00:00+13:00"},
+            {"branch": "agent/gv-2", "merged": False, "ahead": "2", "last": "two", "when": "2026-11-21T11:30:45+13:00"},
         ])
 
     def test_failure_of_a_required_command_is_an_error(self):
