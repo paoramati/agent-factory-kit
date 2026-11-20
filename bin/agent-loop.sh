@@ -96,6 +96,25 @@ fi
 git diff --quiet && git diff --cached --quiet || { log "Working tree is dirty. Commit or stash first."; exit 1; }
 git checkout -q "$MAIN_BRANCH"
 
+# Preflight: prove the setup works before any agent spends money. PREFLIGHT=0 skips the gate run.
+export GATE_STRICT=1   # a gate that skips a step it cannot run must fail, not pass quietly
+bd list --limit 1 >/dev/null 2>&1 || { log "Preflight: bd cannot read the tracker here (BEADS_DIR=${BEADS_DIR:-unset}). Run bd init or fix the store."; exit 1; }
+if [[ "${PREFLIGHT:-1}" != 0 ]]; then
+  log "Preflight: running the gate on $MAIN_BRANCH"
+  if ! $CI_CMD > "$LOG_DIR/preflight.log" 2>&1; then
+    log "Preflight: the gate is red on $MAIN_BRANCH. Fix it before running agents. Last lines:"; tail -n 15 "$LOG_DIR/preflight.log" | tee -a "$RUN_LOG"; exit 1
+  fi
+fi
+if [[ "$AGENT" == claude ]]; then
+  trusted="$(py -c 'import json,os,sys
+try:
+    p=json.load(open(os.path.expanduser("~/.claude.json"))).get("projects",{})
+    r=sys.argv[1].replace(chr(92),"/")
+    print(1 if any(k.replace(chr(92),"/")==r and v.get("hasTrustDialogAccepted") for k,v in p.items()) else 0)
+except Exception: print(0)' "$REPO_ROOT" | tr -d '\r')"
+  [[ "$trusted" == 1 ]] || log "Preflight: $REPO_ROOT is not trusted by Claude Code, so project settings (allow rules, hooks, time tracking) are ignored; ALLOWED_TOOLS still applies. Run claude there once and accept the trust prompt."
+fi
+
 declare -A PIDS=() FAILS=() REQUEUES=()
 
 # Whether the next attempt on a ticket continues from its branch is kept in a file, so it survives
@@ -210,6 +229,17 @@ for l in open(sys.argv[1]):
 print(round(t,4))' "$STATE_DIR/$id.cost" 2>/dev/null || echo 0)"
   cost_total="$(py -c "print(round($cost_total + ${cost:-0}, 4))")"
   log "[$id] agent finished ($res), cost \$${cost:-0}, total \$$cost_total"
+  if [[ "$res" != ok ]]; then  # say why: the agent's own words and any denied tools
+    py -c 'import glob,json,os,sys
+fs=sorted(glob.glob(os.path.join(sys.argv[1], sys.argv[2]+"-*.json")), key=os.path.getmtime)
+if fs:
+    try:
+        d=json.load(open(fs[-1]))
+        den=[x.get("tool_name","?")+": "+str(x.get("tool_input",{}).get("command",""))[:80] for x in d.get("permission_denials",[])]
+        print("  agent said: "+str(d.get("result",""))[:300].replace("\n"," "))
+        if den: print("  denied tools: "+"; ".join(den[:3]))
+    except Exception: pass' "$LOG_DIR" "$id" 2>/dev/null | tr -d '\r' | tee -a "$RUN_LOG" || true
+  fi
   case "$res" in
     ok)         integrate "$id" ;;
     noop)       fail "$id" "agent made no commits (see $LOG_DIR/)" 0 ;;
