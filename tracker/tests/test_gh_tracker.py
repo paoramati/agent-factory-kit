@@ -2,7 +2,7 @@ import json
 import unittest
 
 from tracker import gh_tracker
-from tracker.gh_tracker import GithubTracker, TrackerError, parse_blockers
+from tracker.gh_tracker import GithubTracker, TrackerError, parse_blockers, parse_parents
 
 LIST = "gh issue list --repo o/r --state all --limit 1000 --json number,title,state,labels,body"
 
@@ -56,6 +56,11 @@ class ParseBlockersTest(unittest.TestCase):
 
     def test_a_bare_issue_reference_line_does_not_end_the_section(self):
         self.assertEqual(parse_blockers("## Blocked by\n\n#4\n#5\n"), ([4, 5], []))
+
+    def test_headings_inside_code_fences_are_ignored(self):
+        body = "## Spec\n```yaml\n# Blocked by\n- #99\n```\n\n## Blocked by\n\n- #4\n"
+        self.assertEqual(parse_blockers(body), ([4], []))
+        self.assertEqual(parse_parents("## Spec\n```\n## Parent\n#9\n```\n"), [])
 
     def test_crlf_bodies(self):
         self.assertEqual(parse_blockers("## Blocked by\r\n\r\n- #4\r\n"), ([4], []))

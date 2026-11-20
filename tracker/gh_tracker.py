@@ -51,8 +51,13 @@ _NUM = re.compile(r"#(\d+)")
 
 def _section(body, name):
     """Non-blank lines under the heading `name` (any level, any case) up to the next heading."""
-    lines, inside = [], False
+    lines, inside, fenced = [], False, False
     for line in (body or "").splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
         m = _HEADING.match(line.rstrip())
         if m:
             inside = m.group(1).lower() == name
