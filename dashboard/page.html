@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- Layout decision: command center; prioritize issues, then PRs, then supporting details. -->
 <html lang="en">
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -118,6 +119,92 @@
       border-radius: 0.3rem;
       color: var(--bad);
     }
+    .eyebrow {
+      color: var(--mute);
+      font-size: 0.75rem;
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .overview {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+      gap: 1rem;
+      margin-top: 1.2rem;
+    }
+    .repo-card {
+      border: 1px solid var(--line);
+      border-radius: 0.75rem;
+      padding: 1rem;
+      min-width: 0;
+    }
+    .repo-card h2 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+    .card-head,
+    .issue-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.7rem;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+      margin: 1rem 0;
+    }
+    .metric {
+      border-left: 2px solid var(--line);
+      padding-left: 0.55rem;
+    }
+    .metric strong {
+      display: block;
+      font-size: 1.15rem;
+    }
+    .metric span,
+    .small {
+      color: var(--mute);
+      font-size: 0.82rem;
+    }
+    .signals {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin: 0.6rem 0;
+    }
+    .signal {
+      border: 1px solid var(--line);
+      border-radius: 99px;
+      padding: 0.12rem 0.5rem;
+      color: var(--mute);
+      font-size: 0.75rem;
+    }
+    .signal.warn {
+      color: var(--warn);
+      border-color: var(--warn);
+    }
+    .signal.bad {
+      color: var(--bad);
+      border-color: var(--bad);
+    }
+    .issue-list {
+      display: grid;
+      gap: 0.55rem;
+      margin: 0.8rem 0;
+      max-height: 22rem;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding-right: 0.4rem;
+    }
+    .issue {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 0.55rem;
+    }
+    .issue:last-child {
+      border-bottom: 0;
+    }
   </style>
   <main>
     <h1>Factory dashboard</h1>
@@ -175,16 +262,18 @@
             .join("")}</tbody></table></div>`
         : `<p class="mute">None.</p>`;
 
-    // Open/closed state of each <details>, kept across re-renders. Default: open.
-    const closed = new Set();
+    // Keep details state across the three-second refresh.
+    const detailState = new Map();
     document.addEventListener(
       "toggle",
       (e) => {
         const k = e.target.dataset && e.target.dataset.key;
-        if (k) e.target.open ? closed.delete(k) : closed.add(k);
+        if (k) detailState.set(k, e.target.open);
       },
       true,
     );
+    const isOpen = (key, defaultOpen = false) =>
+      detailState.has(key) ? detailState.get(key) : defaultOpen;
 
     function badge(s) {
       if (!s) return "";
@@ -196,104 +285,92 @@
     }
 
     // One collapsible block for a Source. body(data) renders only when there is data.
-    function block(key, title, s, body) {
+    function block(key, title, s, body, defaultOpen = false) {
       if (!s) return "";
       const inner =
         s.status === "unavailable"
           ? `<p class="mute">No data yet.</p>`
           : `<div class="${s.status === "stale" ? "stale-body" : ""}">${body(s.data)}</div>`;
-      return `<details data-key="${esc(key)}"${closed.has(key) ? "" : " open"}><summary>${title}${badge(s)}</summary>${inner}</details>`;
+      return `<details data-key="${esc(key)}"${isOpen(key, defaultOpen) ? " open" : ""}><summary>${title}${badge(s)}</summary>${inner}</details>`;
     }
 
-    const counts = (items, st) => items.filter((i) => i.status === st).length;
-
-    function summaryRow(r) {
-      const g = r.sources.git,
-        t = r.sources.tracker,
-        h = r.sources.github;
-      if (g && g.data && g.data.missing)
-        return `<tr><td>${esc(r.name)}</td><td colspan="6">not found at ${esc(r.path)}</td></tr>`;
-      const cell = (s, f) =>
-        !s
-          ? "n/a"
-          : s.data == null
-            ? `<span class="badge unavailable">unavailable</span>`
-            : esc(f(s.data)) +
-              (s.status === "stale"
-                ? ` <span class="badge stale">stale</span>`
-                : "");
-      const tk = cell(
-        t,
-        (d) =>
-          `${counts(d, "closed")}/${d.length} done, ${counts(d, "in_progress")} active, ${counts(d, "blocked")} blocked`,
-      );
-      const gi = cell(h, (d) => {
-        // Tickets are the issues that are not epics: done, being worked by the loop, handed to a human.
-        const tix = d.issues.filter((i) => !i.epic);
-        const has = (i, l) => (i.labels || []).some((x) => x.name === l);
-        const open = tix.filter((i) => i.state === "OPEN");
-        return `${tix.length - open.length}/${tix.length} done, ${open.filter((i) => has(i, "in-progress")).length} active, ${open.filter((i) => has(i, "ready-for-human")).length} for human`;
-      });
-      const gp = cell(
-        h,
-        (d) =>
-          `${d.prs.filter((i) => i.state === "OPEN").length} open / ${d.prs.length}`,
-      );
-      const lp = cell(
-        g,
-        (d) =>
-          `${d.lprs.filter((x) => !x.merged).length} open / ${d.lprs.length}`,
-      );
-      const up =
-        g && g.data
-          ? esc(g.data.state.unpushed) +
-            (!["0", "no remote"].includes(g.data.state.unpushed) ? " ⚠" : "")
-          : "n/a";
-      const dirty = g && g.data && g.data.state.dirty ? " (dirty)" : "";
-      return `<tr><td><a href="#repo-${esc(r.name)}">${esc(r.name)}</a></td><td>${tk}</td><td>${gi}</td><td>${gp}</td><td>${lp}</td><td>${up}</td><td><code>${esc(r.branch)}</code>${dirty}</td></tr>`;
-    }
-
-    function section(r) {
-      const g = r.sources.git;
-      if (g && g.data && g.data.missing) return "";
-      const order = {
-        in_progress: 0,
-        open: 1,
-        blocked: 2,
-        deferred: 3,
-        closed: 4,
+    function issueFacts(r) {
+      const source = r.sources.github;
+      const issues = source?.data?.issues || [];
+      const tickets = issues.filter((i) => !i.epic);
+      const has = (i, label) => (i.labels || []).some((l) => l.name === label);
+      const open = tickets.filter((i) => i.state === "OPEN");
+      return {
+        available: source?.data != null,
+        all: tickets.length,
+        done: tickets.filter((i) => i.state === "CLOSED").length,
+        active: open.filter((i) => has(i, "in-progress")).length,
+        human: open.filter((i) => has(i, "ready-for-human")).length,
+        issues,
       };
-      const k = (x) => `${r.name}/${x}`;
-      let head = `<h2 id="repo-${esc(r.name)}">${esc(r.name)} <span class="mute">${esc(r.github)}</span></h2>`;
-      if (g && g.data)
-        head += `<p class="mute">Head of <code>${esc(r.branch)}</code>: ${esc(g.data.state.head)} · unpushed commits: ${esc(g.data.state.unpushed)}</p>`;
+    }
+
+    function freshness(r) {
+      return Object.entries(r.sources)
+        .map(([name, s]) => {
+          const label = name === "github" ? "GitHub" : name;
+          if (s.status === "fresh")
+            return `<span class="signal">${esc(label)} · ${age(s.age)} ago</span>`;
+          if (s.status === "stale")
+            return `<span class="signal warn">${esc(label)} · stale ${age(s.age)}</span>`;
+          return `<span class="signal bad">${esc(label)} · unavailable</span>`;
+        })
+        .join("");
+    }
+
+    function issueList(r) {
+      if (!r.sources.github?.data)
+        return `<p class="small">${r.sources.github ? "GitHub data unavailable." : "GitHub not configured."}</p>`;
+      const { issues } = issueFacts(r);
+      const sorted = [...issues].sort(
+        (a, b) =>
+          Number(a.state !== "OPEN") - Number(b.state !== "OPEN") ||
+          Number(a.epic) - Number(b.epic) ||
+          a.number - b.number,
+      );
+      if (!sorted.length) return `<p class="small">No GitHub issues.</p>`;
+      return `<div class="issue-list" data-scroll-key="issues-${esc(r.name)}">${sorted
+        .map((i) => {
+          const labels = (i.labels || []).map((l) => tag(l.name)).join(" ");
+          return `<div class="issue"><div class="issue-head"><a href="${url(i.url)}" target="_blank" rel="noopener">#${esc(i.number)} ${esc(i.title)}</a><span class="small">${esc(i.state.toLowerCase())}${i.epic ? " · epic" : ""}</span></div>${labels}</div>`;
+        })
+        .join("")}</div>`;
+    }
+
+    function repoSignals(r) {
+      const g = r.sources.git?.data;
+      if (g?.missing) return `<span class="signal bad">repository path missing</span>`;
+      if (!g) return `<span class="signal">Git unavailable</span>`;
+      const state = g.state;
+      return `<span class="signal">branch <code>${esc(r.branch)}</code></span><span class="signal${state.dirty ? " warn" : ""}">${state.dirty ? "working tree dirty" : "working tree clean"}</span><span class="signal${!["0", "no remote"].includes(state.unpushed) ? " warn" : ""}">${esc(state.unpushed)} unpushed</span>`;
+    }
+
+    function repoDetails(r) {
+      const k = (name) => `${r.name}/${name}`;
+      const g = r.sources.git;
+      const gh = r.sources.github;
+      const local = r.sources.tracker;
       return (
-        head +
-        block(k("tickets"), "Local tickets (beads)", r.sources.tracker, (d) =>
+        block(k("prs"), "GitHub pull requests", gh, (d) =>
           table(
-            ["ID", "Title", "Status", "Pri", "Labels"],
-            [...d]
-              .sort(
-                (a, b) =>
-                  (order[a.status] ?? 9) - (order[b.status] ?? 9) ||
-                  (a.priority ?? 9) - (b.priority ?? 9) ||
-                  String(a.id).localeCompare(String(b.id)),
-              )
-              .map((i) => [
-                `<code>${esc(i.id)}</code>`,
-                esc(i.title),
-                esc(i.status),
-                "P" + esc(i.priority),
-                (i.labels || [])
-                  .filter((l) => !l.startsWith("src:"))
-                  .map(tag)
-                  .join(" "),
-              ]),
+            ["#", "Title", "State", "Branch"],
+            d.prs.map((p) => [
+              `<a href="${url(p.url)}" target="_blank" rel="noopener">#${esc(p.number)}</a>`,
+              esc(p.title),
+              esc(p.state),
+              `<code>${esc(p.headRefName)}</code>`,
+            ]),
           ),
+          true,
         ) +
-        block(k("lprs"), "Local PRs (agent branches)", g, (d) =>
+        block(k("lprs"), "Local PRs · agent branches", g, (d) =>
           table(
-            ["Branch", "State", "Commits ahead", "Last commit"],
+            ["Branch", "State", "Ahead", "Last commit"],
             d.lprs.map((x) => [
               `<code>${esc(x.branch)}</code>`,
               x.merged ? "merged" : "open",
@@ -314,38 +391,55 @@
               "</ul>"
             : `<p class="mute">None.</p>`,
         ) +
-        block(k("issues"), "GitHub issues", r.sources.github, (d) =>
-          table(
-            ["#", "Title", "State", "Labels"],
-            d.issues.map((i) => [
-              `<a href="${url(i.url)}" target="_blank" rel="noopener">#${esc(i.number)}</a>`,
-              esc(i.title) + (i.epic ? " " + tag("epic") : ""),
-              esc(i.state),
-              (i.labels || []).map((l) => tag(l.name)).join(" "),
-            ]),
-          ),
-        ) +
-        block(k("prs"), "GitHub pull requests", r.sources.github, (d) =>
-          table(
-            ["#", "Title", "State", "Branch"],
-            d.prs.map((p) => [
-              `<a href="${url(p.url)}" target="_blank" rel="noopener">#${esc(p.number)}</a>`,
-              esc(p.title),
-              esc(p.state),
-              `<code>${esc(p.headRefName)}</code>`,
-            ]),
-          ),
-        )
+        (local
+          ? block(k("tickets"), "Local tickets (beads)", local, (d) =>
+              table(
+                ["ID", "Title", "Status", "Priority"],
+                d.map((i) => [
+                  `<code>${esc(i.id)}</code>`,
+                  esc(i.title),
+                  esc(i.status),
+                  "P" + esc(i.priority),
+                ]),
+              ),
+            )
+          : "")
       );
+    }
+
+    function commandCenter(st) {
+      return `<div class="overview">${st.repos
+        .map((r) => {
+          const f = issueFacts(r);
+          const g = r.sources.git?.data;
+          const href = r.github
+            ? url(`https://github.com/${r.github}`)
+            : "";
+          const link = (text) =>
+            href
+              ? `<a href="${href}" target="_blank" rel="noopener">${esc(text)}</a>`
+              : esc(text);
+          if (g?.missing)
+            return `<article class="repo-card"><h2>${esc(r.name)}</h2><p class="small">Repository not found at ${esc(r.path)}</p></article>`;
+          return `<article class="repo-card"><div class="card-head"><div><div class="eyebrow">${link(r.github || "Repository")}</div><h2>${link(r.name)}</h2></div><span class="small">${esc(r.branch)}</span></div><div class="metrics"><div class="metric"><strong>${f.available ? `${f.done}/${f.all}` : "—"}</strong><span>tickets done</span></div><div class="metric"><strong>${f.available ? f.active : "—"}</strong><span>active</span></div><div class="metric"><strong>${f.available ? f.human : "—"}</strong><span>needs human</span></div></div><div class="signals">${repoSignals(r)}</div><div class="signals">${freshness(r)}</div>${block(`${r.name}/issues`, "GitHub issue queue", r.sources.github, () => issueList(r), true)}${repoDetails(r)}</article>`;
+        })
+        .join("")}</div>`;
     }
 
     function render(st) {
       const y = window.scrollY;
       document.getElementById("meta").textContent =
-        `Updated ${st.generated} · refreshes every ${POLL_MS / 1000}s · tracker = beads tickets, GitHub = issues and PRs, local PRs = agent/<id> branches`;
-      document.getElementById("root").innerHTML =
-        `<div class="wrap"><table><thead><tr><th>Repo</th><th>Local tickets</th><th>GH tickets</th><th>GH PRs</th><th>Local PRs</th><th>Unpushed</th><th>Branch</th></tr></thead><tbody>${st.repos.map(summaryRow).join("")}</tbody></table></div>` +
-        st.repos.map(section).join("");
+        `Updated ${st.generated} · refreshes every ${POLL_MS / 1000}s · GitHub Issues are tickets; local agent branches are not GitHub PRs`;
+      const root = document.getElementById("root");
+      const scrollPositions = new Map(
+        [...root.querySelectorAll("[data-scroll-key]")].map((e) => [
+          e.dataset.scrollKey,
+          e.scrollTop,
+        ]),
+      );
+      root.innerHTML = commandCenter(st);
+      for (const e of root.querySelectorAll("[data-scroll-key]"))
+        e.scrollTop = scrollPositions.get(e.dataset.scrollKey) || 0;
       window.scrollTo(0, y);
     }
 
