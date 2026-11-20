@@ -27,7 +27,10 @@
 #   PROMPT_FILE=PROMPT.md  (falls back to the kit's templates/PROMPT.md)
 #   WORKTREE_DIR=.worktrees
 #   ALLOWED_TOOLS="..."  tools the agent may use without prompting (see the default below)
-#   READY_LABEL=agent-ok only tickets with this label are picked up (human-only tickets are skipped)
+#   TRACKER=beads        beads | github. Where tickets live. github reads issues of TRACKER_REPO.
+#   TRACKER_REPO         owner/name for TRACKER=github (default: from the origin remote)
+#   READY_LABEL          only tickets with this label are picked up. Default agent-ok (beads) or
+#                        ready-for-agent (github)
 #   ALLOW_REMOTE=1       run in a repo with a live push remote (agents still cannot push)
 #   CLAUDE_BIN=claude    the agent command (override for testing)
 #   KIT_DIR              path to agent-factory-kit (auto-detected)
@@ -53,7 +56,14 @@ MAIN_BRANCH="${MAIN_BRANCH:-main}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 # Passed on the command line because Claude Code ignores a project's permissions.allow until the
 # folder is trusted. Deliberately no "Bash(bash:*)": that would let the agent run anything.
-ALLOWED_TOOLS="${ALLOWED_TOOLS:-Skill Bash(./ci.sh:*) Bash(git add:*) Bash(git commit:*) Bash(git merge:*) Bash(git status:*) Bash(git diff:*) Bash(git log:*) Bash(bd:*) Bash(ls:*) Bash(cat:*) Bash(mkdir:*)}"
+TRACKER="${TRACKER:-beads}"
+case "$TRACKER" in
+  beads)  TRACKER_TOOLS="Bash(bd:*)" ;;
+  # Read and comment only: the loop alone labels, closes and reopens issues.
+  github) TRACKER_TOOLS="Bash(gh issue view:*) Bash(gh issue comment:*)" ;;
+  *) echo "Unknown TRACKER=$TRACKER (use beads or github)." >&2; exit 1 ;;
+esac
+ALLOWED_TOOLS="${ALLOWED_TOOLS:-Skill Bash(./ci.sh:*) Bash(git add:*) Bash(git commit:*) Bash(git merge:*) Bash(git status:*) Bash(git diff:*) Bash(git log:*) $TRACKER_TOOLS Bash(ls:*) Bash(cat:*) Bash(mkdir:*)}"
 CI_CMD="${CI_CMD:-./ci.sh}"
 WORKTREE_DIR="${WORKTREE_DIR:-.worktrees}"
 KIT_DIR="${KIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -68,12 +78,14 @@ STATE_DIR="$LOG_DIR/state"
 mkdir -p "$LOG_DIR" "$STATE_DIR" ".agent/time" "$WORKTREE_DIR"
 rm -f "$STATE_DIR"/*.result "$STATE_DIR"/*.cost 2>/dev/null || true
 # Worktrees do not contain the git-ignored .beads store, so point bd at the main repo's.
-[[ -d "$REPO_ROOT/.beads" ]] && export BEADS_DIR="$REPO_ROOT/.beads"
+[[ "$TRACKER" == beads && -d "$REPO_ROOT/.beads" ]] && export BEADS_DIR="$REPO_ROOT/.beads"
 RUN_LOG="$LOG_DIR/run-$(date +%Y%m%d-%H%M%S).log"
 
 log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$RUN_LOG"; }
 
-# ---- tracker adapter (beads). Edit these to use another tracker. ----------
+# ---- tracker adapter. Both backends offer: ready (ids, one per line), claim, note, status
+# (open|blocked), close (optional comment), title, and help (the commands an agent uses). ----------
+if [[ "$TRACKER" == beads ]]; then
 tracker_ready()   { bd ready --label "${READY_LABEL:-agent-ok}" --json 2>/dev/null | py -c 'import json,sys
 d=json.load(sys.stdin)
 items=d if isinstance(d,list) else d.get("issues",d.get("items",[]))
@@ -85,6 +97,22 @@ tracker_close()   { bd close "$1" >/dev/null; }
 tracker_title()   { bd show "$1" --json 2>/dev/null | py -c 'import json,sys
 d=json.load(sys.stdin); d=d[0] if isinstance(d,list) else d
 print(d.get("title",""))' | tr -d '\r' || true; }
+tracker_help()    { echo "Read the ticket with \`bd show $1\`. Add your note with \`bd comments add $1 \"<text>\"\`."; }
+else
+# GitHub Issues. Loop ids are gh-<number>. All logic lives in tracker/gh_tracker.py.
+if [[ -z "${TRACKER_REPO:-}" ]]; then
+  TRACKER_REPO="$(git remote get-url origin 2>/dev/null | sed -E 's#^.*github\.com[:/]##; s#\.git$##' | tr -d '\r' || true)"
+fi
+[[ "$TRACKER_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "TRACKER=github needs TRACKER_REPO=owner/name (could not read it from the origin remote)." >&2; exit 1; }
+ght()             { py "$KIT_DIR/tracker/gh_tracker.py" "$@" --repo "$TRACKER_REPO" --ready-label "${READY_LABEL:-ready-for-agent}"; }
+tracker_ready()   { ght ready | tr -d '\r' | sed 's/^/gh-/'; }
+tracker_claim()   { ght claim "$1" >/dev/null; }
+tracker_note()    { ght note "$1" "--body=$2" >/dev/null 2>&1 || true; }
+tracker_status()  { ght status "$1" "$2" >/dev/null; }
+tracker_close()   { ght close "$1" ${2:+"--comment=$2"} >/dev/null; }
+tracker_title()   { ght title "$1" 2>/dev/null | tr -d '\r' || true; }
+tracker_help()    { echo "Read the ticket with \`gh issue view ${1#gh-} --comments\`. Add your note with \`gh issue comment ${1#gh-} --body \"<text>\"\`. Do not edit labels or close the issue; the loop does that."; }
+fi
 # ---------------------------------------------------------------------------
 
 # Refuse to run if this repo can push anywhere.
@@ -98,7 +126,15 @@ git checkout -q "$MAIN_BRANCH"
 
 # Preflight: prove the setup works before any agent spends money. PREFLIGHT=0 skips the gate run.
 export GATE_STRICT=1   # a gate that skips a step it cannot run must fail, not pass quietly
-bd list --limit 1 >/dev/null 2>&1 || { log "Preflight: bd cannot read the tracker here (BEADS_DIR=${BEADS_DIR:-unset}). Run bd init or fix the store."; exit 1; }
+if [[ "$TRACKER" == beads ]]; then
+  bd list --limit 1 >/dev/null 2>&1 || { log "Preflight: bd cannot read the tracker here (BEADS_DIR=${BEADS_DIR:-unset}). Run bd init or fix the store."; exit 1; }
+else
+  ght setup >"$LOG_DIR/preflight-tracker.log" 2>&1 || { log "Preflight: cannot set up GitHub labels on $TRACKER_REPO (is gh installed and signed in?):"; tee -a "$RUN_LOG" < "$LOG_DIR/preflight-tracker.log"; exit 1; }
+  ght ready >"$LOG_DIR/preflight-tracker.log" 2>&1 || { log "Preflight: cannot read the issues of $TRACKER_REPO:"; tee -a "$RUN_LOG" < "$LOG_DIR/preflight-tracker.log"; exit 1; }
+  if ! ght check >"$LOG_DIR/preflight-tracker.log" 2>&1; then
+    log "Preflight: ready issues of $TRACKER_REPO have bad Blocked by lines. Fix them first:"; tee -a "$RUN_LOG" < "$LOG_DIR/preflight-tracker.log"; exit 1
+  fi
+fi
 if [[ "${PREFLIGHT:-1}" != 0 ]]; then
   log "Preflight: running the gate on $MAIN_BRANCH"
   if ! $CI_CMD > "$LOG_DIR/preflight.log" 2>&1; then
@@ -126,7 +162,7 @@ build_prompt() {  # $1 ticket, $2 work|resolve, $3 worktree
   local id="$1" kind="$2" wt="$3" out
   case "$kind" in
     work)
-      out="$(cat "$PROMPT_FILE")"$'\n\n'"Ticket: $id"
+      out="$(cat "$PROMPT_FILE")"$'\n\n'"Ticket: $id"$'\n'"Tracker commands: $(tracker_help "$id")"
       if keep_get "$id"; then
         out+=$'\n\n'"This is a continuation. Your previous attempt is already committed on this branch and failed the gate. Fix it; do not start over. The gate output (last 60 lines):"$'\n'"$(tail -n 60 "$STATE_DIR/$id.gate.log" 2>/dev/null || true)"
       fi ;;
@@ -213,7 +249,7 @@ integrate() {  # merge a ticket that passed the gate on its branch into the inte
     git reset -q --hard "$pre"
     fail "$id" "ci.sh failed after merge" 1
   else
-    tracker_close "$id"; keep_set "$id" 0; done_count=$((done_count+1))
+    tracker_close "$id" "Merged into $MAIN_BRANCH ($(git rev-parse --short HEAD)): ${title:-ticket}"; keep_set "$id" 0; done_count=$((done_count+1))
     log "[$id] merged and closed"
   fi
 }
@@ -247,7 +283,9 @@ if fs:
     cifail)     fail "$id" "ci.sh failed on branch" 1 ;;
     *)          fail "$id" "worker error: $res" 0 ;;
   esac
-  py "$KIT_DIR/bin/time-rollup.py" --time-dir "$WORKTREE_DIR/$id/.agent/time" --ticket "$id" --write-bd >>"$RUN_LOG" 2>&1 || true
+  if [[ "$TRACKER" == beads ]]; then  # time is written back into beads only
+    py "$KIT_DIR/bin/time-rollup.py" --time-dir "$WORKTREE_DIR/$id/.agent/time" --ticket "$id" --write-bd >>"$RUN_LOG" 2>&1 || true
+  fi
   git worktree remove --force "$WORKTREE_DIR/$id" 2>/dev/null || true
 }
 

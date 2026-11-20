@@ -13,7 +13,9 @@ Exit codes: 0 ok, 1 problems found (check), 2 error (gh failed, bad output).
 """
 import argparse
 import json
+import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -30,11 +32,14 @@ class TrackerError(Exception):
 
 def default_run(cmd):
     """Run a command; return (returncode, text): stdout on success, stderr on failure."""
-    exe = shutil.which(cmd[0])  # Windows: find the real executable, not a bare name
+    # GH_BIN swaps the gh executable (it may carry arguments), so tests can use a fake gh.
+    prefix = shlex.split(os.environ["GH_BIN"]) if cmd[0] == "gh" and os.environ.get("GH_BIN") else [cmd[0]]
+    exe = shutil.which(prefix[0])  # Windows: find the real executable, not a bare name
     if not exe:
-        raise TrackerError(f"{cmd[0]} not found")
+        raise TrackerError(f"{prefix[0]} not found")
     try:
-        r = subprocess.run([exe, *cmd[1:]], capture_output=True, text=True, timeout=TIMEOUT, encoding="utf-8")
+        r = subprocess.run([exe, *prefix[1:], *cmd[1:]], capture_output=True, text=True, timeout=TIMEOUT,
+                           encoding="utf-8")
     except subprocess.TimeoutExpired:
         raise TrackerError(f"{cmd[0]} timed out after {TIMEOUT}s")
     return r.returncode, (r.stdout if r.returncode == 0 else (r.stderr or r.stdout))

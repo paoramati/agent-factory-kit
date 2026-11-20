@@ -152,6 +152,24 @@ class ErrorsTest(unittest.TestCase):
             GithubTracker("o/r", FakeRun(listing=(0, "<html>"))).ready()
 
 
+class GhBinTest(unittest.TestCase):
+    def test_gh_bin_replaces_the_gh_executable_and_may_carry_arguments(self):
+        import os
+        import sys
+        from unittest import mock
+        exe = sys.executable.replace("\\", "/")
+        fake = f'{exe} -c "import sys; print(\'|\'.join(sys.argv[1:]))"'
+        with mock.patch.dict(os.environ, {"GH_BIN": fake}):
+            self.assertEqual(gh_tracker.default_run(["gh", "issue", "list"]), (0, "issue|list\n"))
+
+    def test_missing_executable_is_a_tracker_error(self):
+        import os
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"GH_BIN": "definitely-not-a-tool"}):
+            with self.assertRaisesRegex(TrackerError, "definitely-not-a-tool"):
+                gh_tracker.default_run(["gh", "issue", "list"])
+
+
 class CliTest(unittest.TestCase):
     def test_ready_prints_one_number_per_line(self):
         out = []
