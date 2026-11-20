@@ -4,7 +4,12 @@
 # Must stay fast (SessionEnd has a short timeout) and must never block the agent: always exit 0.
 input="$(cat)"
 root="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-python3 - "$root" "$input" <<'PY' 2>/dev/null || true
+PYCMD=()
+for c in python3 python "py -3"; do
+  if $c -c 'import sys' >/dev/null 2>&1; then read -r -a PYCMD <<<"$c"; break; fi
+done
+[[ ${#PYCMD[@]} -gt 0 ]] || exit 0
+"${PYCMD[@]}" - "$root" "$input" <<'PY' 2>/dev/null || true
 import json, os, sys, datetime
 root, raw = sys.argv[1], sys.argv[2]
 try: d = json.loads(raw)

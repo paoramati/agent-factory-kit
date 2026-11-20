@@ -101,11 +101,7 @@ Writes `repo-YYYYmmdd-HHMMSS.bundle` and keeps the newest 14. Restore with `git 
 
 CLI flags move quickly. Before the first unattended run, confirm against `--help`:
 
-- `claude -p` flags used in `agent-loop.sh` (`--max-turns`, `--output-format json`, `--permission-mode`). Cost is read from `total_cost_usd` in the JSON output.
+- `claude -p` flags used in `agent-loop.sh`. Checked against Claude Code 2.1.329 on 2026-11-20: `--output-format json` (cost is in `total_cost_usd`), `--permission-mode acceptEdits` and `--disallowedTools` work. `--max-turns` is accepted but not listed in `--help`, so recheck it after upgrades.
 - `bd update --help` for the metadata flag used by `time-rollup.py --write-bd`. Without it, time goes to a ticket comment instead.
 - Claude Code hook input fields (`session_id`, `hook_event_name`, `tool_name`).
 - OpenCode plugin event names in `time-tracker.js`.
-
-## License
-
-MIT. See `LICENSE`.

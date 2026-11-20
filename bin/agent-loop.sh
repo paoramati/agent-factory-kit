@@ -14,8 +14,18 @@
 #   CI_CMD=./ci.sh
 #   PROMPT_FILE=PROMPT.md  (falls back to the kit's templates/PROMPT.md)
 #   WORKTREE_DIR=.worktrees
+#   ALLOW_REMOTE=1       run in a repo with a live push remote (agents still cannot push)
 #   KIT_DIR              path to agent-factory-kit (auto-detected)
 set -euo pipefail
+
+# Find a working Python. The Windows Store "python3" stub exists but fails, so test each candidate.
+PYCMD=()
+for c in python3 python "py -3"; do
+  # shellcheck disable=SC2086
+  if $c -c 'import sys' >/dev/null 2>&1; then read -r -a PYCMD <<<"$c"; break; fi
+done
+[[ ${#PYCMD[@]} -gt 0 ]] || { echo "No working Python found (tried python3, python, py -3)." >&2; exit 1; }
+py() { "${PYCMD[@]}" "$@"; }
 
 MAX_TICKETS="${MAX_TICKETS:-5}"
 MAX_HOURS="${MAX_HOURS:-4}"
@@ -39,7 +49,7 @@ RUN_LOG="$LOG_DIR/run-$(date +%Y%m%d-%H%M%S).log"
 log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$RUN_LOG"; }
 
 # ---- tracker adapter (beads). Edit these four to use another tracker. ----
-tracker_next()    { bd ready --json 2>/dev/null | python3 -c 'import json,sys
+tracker_next()    { bd ready --json 2>/dev/null | py -c 'import json,sys
 d=json.load(sys.stdin)
 items=d if isinstance(d,list) else d.get("issues",d.get("items",[]))
 print(items[0]["id"] if items else "")'; }
@@ -50,8 +60,8 @@ tracker_close()   { bd close "$1" >/dev/null; }
 # --------------------------------------------------------------------------
 
 # Refuse to run if this repo can push anywhere.
-if git remote -v | grep '(push)' | grep -vq 'DISABLED'; then
-  log "Refusing to run: a remote has a live push URL. Run $KIT_DIR/bin/lockdown-remote.sh first."
+if [[ "${ALLOW_REMOTE:-0}" != 1 ]] && git remote -v | grep '(push)' | grep -vq 'DISABLED'; then
+  log "Refusing to run: a remote has a live push URL. Run $KIT_DIR/bin/lockdown-remote.sh first, or set ALLOW_REMOTE=1 for a repo you intend to push."
   exit 1
 fi
 [[ -x "${CI_CMD%% *}" ]] || { log "CI command not found or not executable: $CI_CMD"; exit 1; }
@@ -68,7 +78,7 @@ run_agent() {  # $1 ticket, $2 worktree path; prints cost in USD on stdout
           --max-turns "$PER_RUN_TURNS" \
           --permission-mode acceptEdits \
           --disallowedTools "Bash(git push:*)" ) > "$out" 2>>"$RUN_LOG" || true
-      python3 -c 'import json,sys
+      py -c 'import json,sys
 try: print(json.load(open(sys.argv[1])).get("total_cost_usd",0) or 0)
 except Exception: print(0)' "$out"
       ;;
@@ -84,10 +94,10 @@ declare -A FAILS=()
 start=$(date +%s); attempted=0; done_count=0; cost_total=0
 
 while :; do
-  elapsed_h=$(python3 -c "print(($(date +%s)-$start)/3600)")
+  elapsed_h=$(py -c "print(($(date +%s)-$start)/3600)")
   if (( attempted >= MAX_TICKETS )); then log "Stop: ticket limit ($MAX_TICKETS)."; break; fi
-  if python3 -c "import sys; sys.exit(0 if $elapsed_h >= $MAX_HOURS else 1)"; then log "Stop: time limit (${MAX_HOURS}h)."; break; fi
-  if python3 -c "import sys; sys.exit(0 if $cost_total >= $MAX_COST_USD else 1)"; then log "Stop: cost limit (\$$MAX_COST_USD)."; break; fi
+  if py -c "import sys; sys.exit(0 if $elapsed_h >= $MAX_HOURS else 1)"; then log "Stop: time limit (${MAX_HOURS}h)."; break; fi
+  if py -c "import sys; sys.exit(0 if $cost_total >= $MAX_COST_USD else 1)"; then log "Stop: cost limit (\$$MAX_COST_USD)."; break; fi
 
   id="$(tracker_next)"
   [[ -z "$id" ]] && { log "Stop: no ready tickets."; break; }
@@ -102,7 +112,7 @@ while :; do
   git worktree add -q -b "$branch" "$wt" "$MAIN_BRANCH"
 
   cost="$(run_agent "$id" "$wt")"
-  cost_total=$(python3 -c "print(round($cost_total + ${cost:-0}, 4))")
+  cost_total=$(py -c "print(round($cost_total + ${cost:-0}, 4))")
   log "[$id] agent finished, run cost \$${cost:-0}, total \$$cost_total"
 
   # Commit anything the agent left uncommitted.
@@ -133,7 +143,7 @@ while :; do
     fi
   fi
 
-  python3 "$KIT_DIR/bin/time-rollup.py" --time-dir "$wt/.agent/time" --ticket "$id" --write-bd >>"$RUN_LOG" 2>&1 || true
+  py "$KIT_DIR/bin/time-rollup.py" --time-dir "$wt/.agent/time" --ticket "$id" --write-bd >>"$RUN_LOG" 2>&1 || true
   git worktree remove --force "$wt" 2>/dev/null || true
 done
 
