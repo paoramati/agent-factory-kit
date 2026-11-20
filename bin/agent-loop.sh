@@ -14,6 +14,7 @@
 #   CI_CMD=./ci.sh
 #   PROMPT_FILE=PROMPT.md  (falls back to the kit's templates/PROMPT.md)
 #   WORKTREE_DIR=.worktrees
+#   READY_LABEL=agent-ok  only tickets with this label are picked up (human-only tickets are skipped)
 #   ALLOW_REMOTE=1       run in a repo with a live push remote (agents still cannot push)
 #   KIT_DIR              path to agent-factory-kit (auto-detected)
 set -euo pipefail
@@ -50,7 +51,7 @@ RUN_LOG="$LOG_DIR/run-$(date +%Y%m%d-%H%M%S).log"
 log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$RUN_LOG"; }
 
 # ---- tracker adapter (beads). Edit these four to use another tracker. ----
-tracker_next()    { bd ready --json 2>/dev/null | py -c 'import json,sys
+tracker_next()    { bd ready --label "${READY_LABEL:-agent-ok}" --json 2>/dev/null | py -c 'import json,sys
 d=json.load(sys.stdin)
 items=d if isinstance(d,list) else d.get("issues",d.get("items",[]))
 print(items[0]["id"] if items else "")'; }
