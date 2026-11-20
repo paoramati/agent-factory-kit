@@ -1,6 +1,6 @@
 # Agent factory kit
 
-Private tooling that runs AI coding agents unattended: one ticket per fresh agent, a gate script as the only judge, local merges. Read `CONTEXT.md` for the vocabulary and `README.md` for usage.
+Tooling that runs AI coding agents unattended: one ticket per fresh agent, a gate script as the only judge, local merges. Read `CONTEXT.md` for the vocabulary and `README.md` for usage.
 
 ## Layout
 
@@ -18,7 +18,7 @@ Private tooling that runs AI coding agents unattended: one ticket per fresh agen
 
 ### Issue tracker
 
-GitHub Issues on paoramati/agent-factory-kit (private), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+GitHub Issues on paoramati/agent-factory-kit, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

@@ -12,6 +12,7 @@ It is deliberately small. The ideas come from multi-agent orchestrators like Gas
 | `bin/ci.sh.example` | Template for the single CI script both agents and the loop run. Copy to your repo as `ci.sh`. |
 | `bin/lockdown-remote.sh` | Removes push paths from a repo: disables push URLs on every remote, adds a `pre-push` hook that refuses everything. |
 | `bin/backup-bundle.sh` / `bin/backup-bundle.ps1` | Writes a timestamped `git bundle` of all history to a folder (e.g. a synced cloud drive) and prunes old ones. |
+| `bin/status.py` / `bin/dashboard.py` | Local HTML views: one repo's tickets and progress, or every repo in a list (beads tickets, GitHub issues and PRs, local PRs). Nothing is uploaded. See `config/repos.example.json`. |
 | `bin/time-rollup.py` | Turns hook event logs into active time per ticket and writes it back to the tracker. |
 | `hooks/track.sh` | Claude Code hook: appends one timestamped event per hook call. |
 | `opencode/plugins/time-tracker.js` | OpenCode plugin: same event log for OpenCode sessions. |
@@ -111,3 +112,7 @@ CLI flags move quickly. Before the first unattended run, confirm against `--help
 - `bd update --help` for the metadata flag used by `time-rollup.py --write-bd`. Without it, time goes to a ticket comment instead.
 - Claude Code hook input fields (`session_id`, `hook_event_name`, `tool_name`).
 - OpenCode plugin event names in `time-tracker.js`.
+
+## License
+
+MIT. See `LICENSE`.

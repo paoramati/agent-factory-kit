@@ -11,13 +11,16 @@ factory/repos.json. The page is a local file; nothing is uploaded.
 import argparse, datetime, html, json, os, shutil, subprocess, sys, webbrowser
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--config", default=os.path.join(os.path.dirname(__file__), "..", "..", "home", "factory", "repos.json"))
-ap.add_argument("--out", default=None)
+ap.add_argument("--config", default=os.environ.get("FACTORY_REPOS", "repos.json"),
+                help="JSON list of repos (default: $FACTORY_REPOS, else ./repos.json); see config/repos.example.json")
+ap.add_argument("--out", default=None, help="output page (default: .dashboard/index.html beside the config)")
 ap.add_argument("--open", action="store_true")
 a = ap.parse_args()
 cfg_path = os.path.abspath(a.config)
+if not os.path.isfile(cfg_path):
+    sys.exit(f"No repo list at {cfg_path}. Copy config/repos.example.json, edit it, and pass --config or set FACTORY_REPOS.")
 repos = json.load(open(cfg_path, encoding="utf-8"))
-out = a.out or os.path.join(os.path.dirname(cfg_path), "..", ".dashboard", "index.html")
+out = a.out or os.path.join(os.path.dirname(cfg_path), ".dashboard", "index.html")
 
 BD, GH, GIT = shutil.which("bd"), shutil.which("gh"), shutil.which("git")
 

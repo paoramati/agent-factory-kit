@@ -1,6 +1,6 @@
 # Agent factory
 
-Private tooling that runs AI coding agents unattended on a repository, one ticket at a time, while the owner sets standards and reviews.
+Tooling that runs AI coding agents unattended on a repository, one ticket at a time, while the owner sets standards and reviews.
 
 ## Language
 

@@ -1,0 +1,16 @@
+[
+  {
+    "name": "my-project",
+    "path": "C:/projects/my-project",
+    "github": "owner/my-project",
+    "branch": "factory",
+    "beads": true
+  },
+  {
+    "name": "local-only-project",
+    "path": "C:/projects/local-only-project",
+    "github": "",
+    "branch": "main",
+    "beads": true
+  }
+]
