@@ -13,7 +13,7 @@ Tooling that runs AI coding agents unattended: one ticket per fresh agent, a gat
 
 - Use the `bash-on-windows` skill before writing any shell script or Python that launches tools.
 - Test loop changes through `tests/loop-test.sh`; extend it when the loop gains behaviour.
-- Commit locally. The owner pushes.
+- Use `git` and `gh` for GitHub operations the user requests, including pushing topic branches and creating or merging pull requests. Do not push directly to `main`; use pull requests. The unattended loop's push protections remain in force.
 
 ## Agent skills
 
