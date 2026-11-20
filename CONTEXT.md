@@ -28,6 +28,10 @@ _Avoid_: Develop, trunk
 The branch one ticket's work is built on, kept after merging as the record of that ticket.
 _Avoid_: Feature branch, PR branch
 
+**Attempt**:
+One fresh agent session working one ticket; a ticket that fails its gate twice is blocked for a human.
+_Avoid_: Run, try
+
 **Loop**:
 The unattended cycle that claims a ready ticket, runs an agent on it, applies the gate, and repeats until a stop condition.
 _Avoid_: Run (for the whole cycle), pipeline
