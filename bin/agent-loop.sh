@@ -14,6 +14,7 @@
 #   CI_CMD=./ci.sh
 #   PROMPT_FILE=PROMPT.md  (falls back to the kit's templates/PROMPT.md)
 #   WORKTREE_DIR=.worktrees
+#   ALLOWED_TOOLS="..."   tools the agent may use without prompting (see the default in this file)
 #   READY_LABEL=agent-ok  only tickets with this label are picked up (human-only tickets are skipped)
 #   ALLOW_REMOTE=1       run in a repo with a live push remote (agents still cannot push)
 #   KIT_DIR              path to agent-factory-kit (auto-detected)
@@ -35,6 +36,9 @@ PER_RUN_TURNS="${PER_RUN_TURNS:-80}"
 MAX_FAILS="${MAX_FAILS:-2}"
 AGENT="${AGENT:-claude}"
 MAIN_BRANCH="${MAIN_BRANCH:-main}"
+# Passed on the command line because Claude Code ignores a project's permissions.allow until the
+# folder is trusted. Deliberately no "Bash(bash:*)": that would let the agent run anything.
+ALLOWED_TOOLS="${ALLOWED_TOOLS:-Bash(./ci.sh:*) Bash(git add:*) Bash(git commit:*) Bash(git status:*) Bash(git diff:*) Bash(git log:*) Bash(bd:*) Bash(ls:*) Bash(cat:*) Bash(mkdir:*)}"
 CI_CMD="${CI_CMD:-./ci.sh}"
 WORKTREE_DIR="${WORKTREE_DIR:-.worktrees}"
 KIT_DIR="${KIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -46,6 +50,8 @@ cd "$REPO_ROOT"
 git rev-parse --verify -q "$MAIN_BRANCH" >/dev/null || { echo "Branch $MAIN_BRANCH does not exist. Create it first (git branch $MAIN_BRANCH)." >&2; exit 1; }
 LOG_DIR=".agent/loop"
 mkdir -p "$LOG_DIR" ".agent/time" "$WORKTREE_DIR"
+# Worktrees do not contain the git-ignored .beads store, so point bd at the main repo's.
+[[ -d "$REPO_ROOT/.beads" ]] && export BEADS_DIR="$REPO_ROOT/.beads"
 RUN_LOG="$LOG_DIR/run-$(date +%Y%m%d-%H%M%S).log"
 
 log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$RUN_LOG"; }
@@ -82,6 +88,7 @@ run_agent() {  # $1 ticket, $2 worktree path; prints cost in USD on stdout
           --output-format json \
           --max-turns "$PER_RUN_TURNS" \
           --permission-mode acceptEdits \
+          --allowedTools "$ALLOWED_TOOLS" \
           --disallowedTools "Bash(git push:*)" ) > "$out" 2>>"$RUN_LOG" || true
       py -c 'import json,sys
 try: print(json.load(open(sys.argv[1])).get("total_cost_usd",0) or 0)
@@ -130,7 +137,9 @@ while :; do
     else tracker_status "$id" open; log "[$id] reopened: $1"; fi
   }
 
-  if ! ( cd "$wt" && $CI_CMD ) >>"$RUN_LOG" 2>&1; then
+  if [[ "$(git -C "$wt" rev-list --count "$MAIN_BRANCH..HEAD")" == 0 ]]; then
+    fail "agent made no commits (see $LOG_DIR/ for its output)"
+  elif ! ( cd "$wt" && $CI_CMD ) >>"$RUN_LOG" 2>&1; then
     fail "ci.sh failed on branch"
   else
     git checkout -q "$MAIN_BRANCH"
