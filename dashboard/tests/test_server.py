@@ -47,6 +47,9 @@ class ServerTest(unittest.TestCase):
     def test_unknown_route_is_404(self):
         self.assertEqual(request(self.serve(lambda: {}), "GET", "/nope")[0], 404)
 
+    def test_favicon_is_empty_not_a_404(self):
+        self.assertEqual(request(self.serve(lambda: {}), "GET", "/favicon.ico")[0], 204)
+
     def test_only_get_is_allowed(self):
         s = self.serve(lambda: {})
         for m in ("POST", "PUT", "DELETE", "PATCH"):

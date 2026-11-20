@@ -5,7 +5,7 @@ Tooling that runs AI coding agents unattended: one ticket per fresh agent, a gat
 ## Layout
 
 - `skills/`: `factory-dashboard` (open the UI), `ticket-workflow`, `time-tracking`.
-- `bin/agent-loop.sh`: the loop. `bin/status.py` (one repo) and `bin/dashboard.py` (all repos, beads plus GitHub plus local PRs): local views of issues, branches and progress. `bin/time-rollup.py`: active time per ticket.
+- `bin/agent-loop.sh`: the loop. `bin/status.py` (one repo): local view of issues, branches and progress. `dashboard/` (all repos, beads plus GitHub plus local PRs): the live Dashboard, run `py -m dashboard --config <repo list>` from the kit directory; tests in `dashboard/tests`. `bin/time-rollup.py`: active time per ticket.
 - `templates/PROMPT.md`: the per-ticket prompt every worker receives. `config/`: Claude Code and OpenCode settings.
 - `tests/loop-test.sh`: runs the loop against a throwaway repo with a fake agent. `ci.sh`: the gate; run it before every commit.
 

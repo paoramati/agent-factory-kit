@@ -28,6 +28,8 @@ def make_server(state_fn, port=DEFAULT_PORT, host="127.0.0.1"):
             if path == "/":
                 with open(PAGE, "rb") as f:
                     return self._send(200, "text/html; charset=utf-8", f.read())
+            if path == "/favicon.ico":
+                return self._send(204, "image/x-icon", b"")
             self._send(404, "text/plain; charset=utf-8", b"not found")
 
         def _no(self):
